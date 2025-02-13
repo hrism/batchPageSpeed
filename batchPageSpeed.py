@@ -12,7 +12,6 @@ API_URL = "https://www.googleapis.com/pagespeedonline/v5/runPagespeed"
 
 def initialize_database():
     """Creates or connects to an SQLite database."""
-    db_path = "/your_path/pagespeed_results.db"
     conn = sqlite3.connect(db_path)
     return conn
 
@@ -34,6 +33,8 @@ def create_table(conn):
             interactive TEXT,
             first_meaningful_paint TEXT,
             cumulative_layout_shift TEXT,
+            largest_contentful_paint TEXT,
+            total_blocking_time TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
@@ -56,7 +57,7 @@ async def fetch_pagespeed(session, url_entry):
         if response.status != 200:
             error_detail = await response.text()
             print(f"Failed to fetch {url} with status code {response.status}. Detail: {error_detail}")
-            return url_id, url, strategy, None, None, None, None, None, None, None, None, None
+            return url_id, url, strategy, None, None, None, None, None, None, None, None, None, None, None
         result = await response.json()
         lighthouse_result = result.get("lighthouseResult", {})
         categories = lighthouse_result.get("categories", {})
@@ -73,8 +74,13 @@ async def fetch_pagespeed(session, url_entry):
         fmp = audits.get("first-meaningful-paint", {}).get("displayValue")
         cls = audits.get("cumulative-layout-shift", {}).get("displayValue")
 
+        # 追加: Largest Contentful Paint (LCP)
+        lcp = audits.get("largest-contentful-paint", {}).get("displayValue")
+        # 追加: Total Blocking Time (TBT)
+        tbt = audits.get("total-blocking-time", {}).get("displayValue")
+
         print(f"Fetched data for ID: {url_id}, URL: {url}: Performance={performance}, Accessibility={accessibility}, SEO={seo}")
-        return url_id, url, strategy, performance, accessibility, best_practices, seo, fcp, speed_index, interactive, fmp, cls
+        return url_id, url, strategy, performance, accessibility, best_practices, seo, fcp, speed_index, interactive, fmp, cls, lcp, tbt
 
 async def process_urls(urls):
     """Fetch PageSpeed data for multiple URLs and save results to the database."""
@@ -90,17 +96,18 @@ async def process_urls(urls):
         for result in sorted(results, key=lambda x: x[0]):  # Sort by ID
             try:
                 (url_id, url, strategy, performance, accessibility, best_practices, seo,
-                 fcp, speed_index, interactive, fmp, cls) = result
+                 fcp, speed_index, interactive, fmp, cls, lcp, tbt) = result
                 if performance is not None:
                     cursor = conn.cursor()
                     cursor.execute(f'''
                         INSERT INTO {table_name} (
                             id, url, strategy, performance, accessibility, best_practices, seo,
                             first_contentful_paint, speed_index, interactive,
-                            first_meaningful_paint, cumulative_layout_shift
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            first_meaningful_paint, cumulative_layout_shift,
+                            largest_contentful_paint, total_blocking_time
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ''', (url_id, url, strategy, performance, accessibility, best_practices, seo,
-                          fcp, speed_index, interactive, fmp, cls))
+                          fcp, speed_index, interactive, fmp, cls, lcp, tbt))
                     conn.commit()
                     print(f"Saved result for {url} (ID: {url_id}): Performance={performance}")
                 else:
